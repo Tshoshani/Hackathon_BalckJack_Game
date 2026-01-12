@@ -1,2 +1,2 @@
-# Hackathon_BalckJack_Game
+# Hackathon_BlackJack_Game
 client-server hackathon project

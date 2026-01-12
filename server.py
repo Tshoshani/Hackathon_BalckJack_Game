@@ -140,69 +140,96 @@ class BlackjackServer:
         for r in range(1, rounds + 1):
             print(f"--- Round {r} vs {client_name} ---")
             player_total = 0
-            dealer_total = 0
-            in_round = True
-
-            # --- PLAYER'S TURN ---
-            while in_round:
-                # 1. Generate a new card and update player total
+            
+            # 1. Initial Deal
+            # Server deals 2 cards to player
+            for _ in range(2):
                 rank = random.randint(1, 13)
                 suit = random.randint(0, 3)
                 player_total += utils.get_card_value(rank)
-                
+                self.send_payload(client_socket, utils.RESULT_NOT_OVER, rank, suit)
                 print(f"Dealt {rank} to {client_name}. Total: {player_total}")
 
-                # 2. Check if player busted (over 21)
-                if player_total > 21:
-                    # Send final result (0x2 for LOSS)
-                    self.send_payload(client_socket, utils.RESULT_LOSS, rank, suit)
-                    print(f"{client_name} Busted! Dealer wins.")
-                    in_round = False
-                    break # Exit the round loop immediately
+            # Dealer gets 2 cards (1 hidden)
+            dealer_card1_rank = random.randint(1, 13)
+            dealer_card1_suit = random.randint(0, 3)
+            dealer_card2_rank = random.randint(1, 13)
+            # dealer_card2_suit = random.randint(0, 3) 
+            dealer_total = utils.get_card_value(dealer_card1_rank) + utils.get_card_value(dealer_card2_rank)
+            print(f"Dealer started with a visible {dealer_card1_rank} and a hidden card. Total: {dealer_total}")
+            
+            # If player busted in the initial deal (Double Ace = 22, but Ace can be 1? 
+            # utils.get_card_value(1) returns 11. logic doesn't handle Soft Ace.
+            # 2 Aces = 22. Busted.
+            if player_total > 21:
+                # Send final result (0x2 for LOSS)
+                # We send dummy 0,0 rank/suit as per protocol for result
+                self.send_payload(client_socket, utils.RESULT_LOSS, 0, 0)
+                print(f"{client_name} Busted on initial deal! Dealer wins.")
+                continue # Next round
 
-                # 3. Send current card and wait for client's move
-                # Result is 0x0 (Not Over) because the player hasn't busted or stayed yet
-                self.send_payload(client_socket, utils.RESULT_NOT_OVER, rank, suit)
-                
-                # 4. Wait for Player Decision (0x4 Payload, 10 bytes)
-                decision_packet = client_socket.recv(10)
-                if not decision_packet:
-                    in_round = False
-                    break
-
-                # Unpack the decision using !IB5s
-                cookie, msg_type, raw_decision = struct.unpack(utils.PAYLOAD_CLIENT_FORMAT, decision_packet)
-                decision = raw_decision.decode('utf-8').strip('\x00').strip().capitalize()
-
-                print(f"Player {client_name} decided to: {decision}")
-
-                # 5. Handle decision logic
-                if decision == "Stand":
-                    # --- DEALER'S TURN ---
-                    # Only triggered if player stops and hasn't busted
-                    print(f"{client_name} stands at {player_total}. Dealer's turn...")
+            in_round = True
+            while in_round:
+                # Wait for Player Decision (0x4 Payload, 10 bytes)
+                try:
+                    decision_packet = client_socket.recv(10)
+                    if not decision_packet:
+                        in_round = False
+                        break
                     
-                    # Dealer must draw until total is at least 17
-                    while dealer_total < 17:
-                        dealer_card = random.randint(1, 13)
-                        dealer_total += utils.get_card_value(dealer_card)
+                    # Unpack
+                    cookie, msg_type, raw_decision = struct.unpack(utils.PAYLOAD_CLIENT_FORMAT, decision_packet)
+                    decision = raw_decision.decode('utf-8').strip('\x00').strip().capitalize()
+                    print(f"Player {client_name} decided to: {decision}")
                     
-                    print(f"Dealer finished with {dealer_total}")
-                    
-                    # 6. Determine final round result
-                    if dealer_total > 21 or player_total > dealer_total:
-                        result = utils.RESULT_WIN # Player wins
-                    elif player_total < dealer_total:
-                        result = utils.RESULT_LOSS # Dealer wins
+                    if decision == "Stand":
+                        # Deal with Dealer Logic
+                        print(f"{client_name} stands at {player_total}. Dealer's turn...")
+                        print(f"Dealer reveals hidden card: {dealer_card2_rank}. Total: {dealer_total}")
+                        
+                        while dealer_total < 17:
+                            dealer_card = random.randint(1, 13)
+                            # dealer_suit = random.randint(0, 3)
+                            dealer_total += utils.get_card_value(dealer_card)
+                            print(f"Dealer drew {dealer_card}. New Total: {dealer_total}")
+                            # According to protocol, we do NOT send dealer cards to client.
+                            # We only send the FINAL RESULT.
+                        
+                        print(f"Dealer finished with {dealer_total}")
+                        
+                        # Determine final round result
+                        result = utils.RESULT_TIE
+                        if dealer_total > 21:
+                             result = utils.RESULT_WIN # Dealer busted
+                        elif player_total > dealer_total:
+                             result = utils.RESULT_WIN
+                        elif player_total < dealer_total:
+                             result = utils.RESULT_LOSS
+                        else:
+                             result = utils.RESULT_TIE
+                        
+                        self.send_payload(client_socket, result, 0, 0)
+                        in_round = False
+                        
+                    elif decision == "Hittt":
+                        # Deal one card
+                        rank = random.randint(1, 13)
+                        suit = random.randint(0, 3)
+                        player_total += utils.get_card_value(rank)
+                        
+                        # Check bust
+                        if player_total > 21:
+                             self.send_payload(client_socket, utils.RESULT_LOSS, rank, suit)
+                             print(f"{client_name} Busted with {player_total}. Dealer wins.")
+                             in_round = False
+                        else:
+                             self.send_payload(client_socket, utils.RESULT_NOT_OVER, rank, suit)
                     else:
-                        result = utils.RESULT_TIE # Push/Tie
-                    
-                    # 7. Send final result packet to close the round
-                    # We use dummy values (0,0) for rank/suit as the round is now over
-                    self.send_payload(client_socket, result, 0, 0)
-                    in_round = False # Exit the while loop to move to next round
-                
-                # If decision is "Hittt", the 'while in_round' continues and deals another card
+                        print(f"Unknown decision: {decision}. Treating as Stand.")
+                        in_round = False
+                except Exception as e:
+                    print(f"Error processing round: {e}")
+                    in_round = False
 
     def send_payload(self, client_socket, result, rank, suit):
         """Helper to pack and send the 0x4 Payload packet"""

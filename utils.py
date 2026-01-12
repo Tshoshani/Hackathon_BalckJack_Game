@@ -1,7 +1,7 @@
 import struct
 
 MAGIC_COOKIE = 0xabcddcba # Size of the cookie 4 bytes always
-UDP_PORT = 13122 # The client must listen at this port
+UDP_PORT = 13117 # The client must listen at this port
 
 # Message types
 MESSAGE_TYPE_OFFER = 0x2 # Server's offer
@@ -15,7 +15,7 @@ MESSAGE_TYPE_PAYLOAD = 0x4 # Game Payload
 # B   - Unsigned Char (1 byte):  Message Type/Rounds/Result/Card Suit
 # H   - Unsigned Short (2 bytes): TCP Port/Card Rank
 # 32s - 32 byte string: Team Names 
-# 5s  - 5 byte string: Player decisions ("Hittt"/"Stand")
+# 5s  - 5 byte string: Player decisions ("Hit"/"Stand")
 
 # Offer (server to client) messege format:
 OFFER_FORMAT = '!IBH32s' # Magic(4), Type(1), Port(2), Name(32)
